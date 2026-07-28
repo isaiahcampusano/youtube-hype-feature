@@ -311,7 +311,7 @@ function navigate(view) {
   render();
 }
 
-app.addEventListener("click", (event) => {
+app.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button || button.disabled) return;
 
