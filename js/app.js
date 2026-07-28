@@ -7,6 +7,13 @@ import {
   resetPrototype,
   storeConfig,
 } from "./hype-store.js";
+import {
+  formatMockPoints,
+  getBackendResetLabel,
+  getFallbackMockPoints,
+  getMockPointsValue,
+  submitHypeToBackend,
+} from "./hype-backend.js";
 
 const app = document.querySelector("#app");
 const liveRegion = document.querySelector("#live-region");
@@ -21,6 +28,7 @@ let likedVideos = new Set();
 let subscribedCreators = new Set();
 let toastTimer;
 let pendingFocusSelector = "";
+let lastHypeResult = null;
 
 const icon = (name, size = 20) => {
   const icons = {
@@ -167,6 +175,42 @@ function howHypeWorks() {
   </section>`;
 }
 
+function hypeFeedbackCard(video, state) {
+  if (!lastHypeResult) return "";
+
+  const { backendState, fallbackState, usedBackend } = lastHypeResult;
+  const historyItems = (backendState?.hypeHistory || fallbackState?.hypeEvents || []).slice(-4);
+  const history = historyItems.map((entry) => ({
+    videoId: entry.videoId || entry.video_id || "unknown",
+    timestamp: entry.timestamp || entry.createdAt || null,
+  }));
+  const pointsTotal = usedBackend
+    ? (backendState?.mockPointsTotal ?? 0)
+    : getFallbackMockPoints(history);
+  const remaining = usedBackend
+    ? backendState?.remainingHypes ?? state.remainingHypes
+    : state.remainingHypes;
+  const currentVideoPoints = getMockPointsValue(video.id);
+  const resetTiming = usedBackend
+    ? getBackendResetLabel(backendState?.resetTime)
+    : "Monday at 12:00 a.m. local time";
+
+  return `<section class="hype-feedback-card" aria-label="Hype confirmation">
+    <div class="card-heading"><strong>Mock Hype sent</strong></div>
+    <p class="balance-caption">This prototype uses clearly labeled mock points and does not connect to real YouTube points.</p>
+    <div class="feedback-grid">
+      <div><strong>${remaining}</strong><span>remaining weekly Hypes</span></div>
+      <div><strong>${formatMockPoints(currentVideoPoints)}</strong><span>current video mock points</span></div>
+      <div><strong>${formatMockPoints(pointsTotal)}</strong><span>mock points you contributed</span></div>
+    </div>
+    <div class="feedback-history">
+      <h3>Recent mock Hype history</h3>
+      <ul>${history.length ? history.map((entry) => `<li>${entry.videoId} · ${entry.timestamp ? new Date(entry.timestamp).toLocaleDateString() : "this week"}</li>`).join("") : `<li>No past Hypes yet this week.</li>`}</ul>
+    </div>
+    <p class="balance-reset">${resetTiming}</p>
+  </section>`;
+}
+
 function relatedCard(video) {
   return `<button class="related-card" data-open-video="${video.id}" aria-label="Watch ${video.title}">
     ${thumbnail(video, true)}
@@ -208,6 +252,7 @@ function watchView() {
       </div>
       ${compactBalance ? `<div class="compact-balance">${icon("sparkle", 17)}<span>${state.remainingHypes} ${state.remainingHypes === 1 ? "Hype" : "Hypes"} left this week · resets Monday</span></div>` : ""}
       ${showBalance ? balanceCard(state) : ""}
+      ${hypeFeedbackCard(video, state)}
       ${howHypeWorks()}
       <section class="description-box"><p>${video.description}</p><p class="micro-copy">${video.eligible ? "Eligible creators can receive Hype points from viewers." : "This video is outside the eligibility range in this concept."}</p></section>
       <h2 class="section-heading">Up next</h2>
@@ -305,11 +350,31 @@ app.addEventListener("click", (event) => {
     const beforeState = getState();
     track("hype_clicked", { videoId: video.id, remainingHypes: beforeState.remainingHypes });
     if (!video.eligible) return showToast("This video is not eligible for Hype in this concept.");
-    const result = hypeVideo(video.id);
-    if (!result.ok) {
-      track("hype_blocked_zero_balance", { videoId: video.id });
-      announce("All free Hypes have been used this week. They reset Monday at 12:00 a.m.");
-      return showToast("All free Hypes have been used this week.");
+
+    const backendResult = await submitHypeToBackend(video.id);
+    let result;
+    if (backendResult.ok) {
+      const backendState = backendResult.data;
+      result = { ok: true, state: { remainingHypes: backendState.remainingHypes }, backendState };
+      lastHypeResult = {
+        usedBackend: true,
+        backendState: {
+          ...backendState,
+          mockPointsTotal: getFallbackMockPoints(backendState.hypeHistory || []),
+          resetTime: new Date().toISOString(),
+        },
+      };
+    } else {
+      result = hypeVideo(video.id);
+      if (!result.ok) {
+        track("hype_blocked_zero_balance", { videoId: video.id });
+        announce("All free Hypes have been used this week. They reset Monday at 12:00 a.m.");
+        return showToast("All free Hypes have been used this week.");
+      }
+      lastHypeResult = {
+        usedBackend: false,
+        fallbackState: { hypeEvents: result.state.hypeEvents },
+      };
     }
     lastHypedVideoId = video.id;
     const { remainingHypes } = result.state;
