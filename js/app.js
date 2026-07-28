@@ -142,7 +142,6 @@ function homeView() {
       <button class="chip" data-topic="${topic}" aria-pressed="${activeTopic === topic}">${topic}</button>`).join("")}
     </div>
     <div class="feed">${filtered.map(videoCard).join("")}</div>
-    ${bottomNav()}
   </section>`;
 }
 
@@ -246,9 +245,9 @@ function watchView() {
       </div>
       <div class="watch-action-row" aria-label="Video actions">
         <button class="action-button" data-like="${video.id}" aria-pressed="${isLiked}">${icon("like", 18)}<span>${isLiked ? "Liked" : "Like"}</span></button>
+        <button class="action-button hype-button" data-hype="${video.id}" ${!video.eligible || state.remainingHypes === 0 ? "disabled" : ""} aria-label="${eligibleLabel} ${video.title}">${icon("sparkle", 18)}<span>${eligibleLabel}</span></button>
         <button class="action-button" data-toast="Share is intentionally not connected in this concept.">${icon("share", 18)}<span>Share</span></button>
         <button class="action-button" data-toast="Downloads are intentionally not connected in this concept.">${icon("download", 18)}<span>Download</span></button>
-        <button class="action-button hype-button" data-hype="${video.id}" ${!video.eligible || state.remainingHypes === 0 ? "disabled" : ""} aria-label="${eligibleLabel} ${video.title}">${icon("sparkle", 18)}<span>${eligibleLabel}</span></button>
       </div>
       ${compactBalance ? `<div class="compact-balance">${icon("sparkle", 17)}<span>${state.remainingHypes} ${state.remainingHypes === 1 ? "Hype" : "Hypes"} left this week · resets Monday</span></div>` : ""}
       ${showBalance ? balanceCard(state) : ""}
@@ -258,7 +257,6 @@ function watchView() {
       <h2 class="section-heading">Up next</h2>
       <div class="related-list">${related.map(relatedCard).join("")}</div>
     </div>
-    ${bottomNav()}
   </section>`;
 }
 
@@ -273,7 +271,6 @@ function exploreView() {
       <div class="topics" aria-label="Hype categories">${categories.map((category) => `<button class="chip" data-topic="${category}" aria-pressed="${activeTopic === category}">${category}</button>`).join("")}</div>
       ${exploreVideos.length ? `<div class="explore-list">${exploreVideos.map((video, index) => `<button class="ranked-card" data-open-video="${video.id}" aria-label="Open ranked video ${index + 1}: ${video.title}"><span class="rank-number">${index + 1}</span>${thumbnail(video, true)}<span class="related-copy"><span class="related-title">${video.title}</span><span class="rank-meta">${video.creator}<br>${video.hypePoints}</span></span></button>`).join("")}</div>` : `<div class="empty-state"><span class="empty-spark">✦</span><h2>No videos in this category</h2><p class="empty-copy">Try another Hype category.</p></div>`}
     </div>
-    ${bottomNav()}
   </section>`;
 }
 
@@ -288,13 +285,12 @@ function youView() {
       <section class="you-panel"><h2>Demo controls</h2><p class="support-copy">Reset local Hype history and restore the weekly balance to three.</p><button class="danger-button" data-reset>Reset prototype</button></section>
       <p class="disclaimer">Unofficial product concept. All creators, videos, and Hype activity are fictional mock data.</p>
     </div>
-    ${bottomNav()}
   </section>`;
 }
 
 function render() {
   const views = { home: homeView, watch: watchView, explore: exploreView, you: youView };
-  app.innerHTML = `${views[currentView]()}${toastMessage ? `<div class="toast" role="status">${toastMessage}</div>` : ""}`;
+  app.innerHTML = `<div class="app-layout"><div class="app-scroller">${views[currentView]()}</div>${bottomNav()}</div>${toastMessage ? `<div class="toast" role="status">${toastMessage}</div>` : ""}`;
   applyPendingFocus();
 }
 

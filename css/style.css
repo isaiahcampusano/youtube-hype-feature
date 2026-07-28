@@ -13,10 +13,14 @@
   --focus: #5bb5ff;
   --radius: 18px;
   --shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  --nav-safe-area: env(safe-area-inset-bottom, 0px);
+  --nav-block-size: calc(72px + var(--nav-safe-area));
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
+  min-height: 100dvh;
+  overflow: hidden;
   background:
     radial-gradient(circle at 50% 5%, rgba(90, 57, 122, 0.28), transparent 32rem),
     #171717;
@@ -35,21 +39,46 @@ a:focus-visible {
 }
 
 .prototype-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   justify-content: center;
 }
 
 .app-frame {
   width: 100%;
-  min-height: 100vh;
+  height: 100dvh;
   background: var(--bg);
-  overflow-x: clip;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-layout {
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.app-scroller {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #4b4b4b transparent;
+}
+
+.app-scroller::-webkit-scrollbar { width: 6px; }
+.app-scroller::-webkit-scrollbar-thumb { border-radius: 999px; background: #4b4b4b; }
+.app-scroller::-webkit-scrollbar-track { background: transparent; }
+
+.app-scroller:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
 }
 
 .screen {
-  min-height: 100vh;
-  padding-bottom: 84px;
+  min-height: 100%;
+  padding-bottom: 24px;
 }
 
 .topbar {
@@ -147,8 +176,10 @@ a:focus-visible {
 .topics {
   display: flex;
   gap: 8px;
-  padding: 6px 16px 14px;
+  padding: 6px 34px 14px 16px;
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-padding-inline: 16px;
   scrollbar-width: none;
 }
 
@@ -354,16 +385,15 @@ a:focus-visible {
 }
 
 .bottom-nav {
-  height: 72px;
+  min-height: var(--nav-block-size);
   justify-content: space-around;
-  position: fixed;
+  position: relative;
   z-index: 7;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 5px 8px max(7px, env(safe-area-inset-bottom));
+  width: 100%;
+  padding: 5px 8px max(7px, var(--nav-safe-area));
   border-top: 1px solid var(--line);
   background: rgba(15, 15, 15, 0.98);
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.14);
 }
 
 .nav-button {
@@ -479,7 +509,9 @@ a:focus-visible {
 .watch-action-row {
   gap: 8px;
   overflow-x: auto;
-  padding: 4px 0 16px;
+  padding: 4px 20px 18px 0;
+  scroll-padding-inline: 0 20px;
+  scroll-snap-type: inline proximity;
   scrollbar-width: none;
 }
 
@@ -497,6 +529,8 @@ a:focus-visible {
   background: var(--surface-raised);
   font-size: 0.82rem;
   font-weight: 750;
+  white-space: nowrap;
+  scroll-snap-align: start;
 }
 
 .action-button:hover { background: var(--surface-hover); }
@@ -574,7 +608,7 @@ a:focus-visible {
 .related-thumb { aspect-ratio: 16 / 9; border-radius: 9px; }
 .related-copy { display: grid; gap: 4px; }
 
-.explore-header { height: 58px; justify-content: space-between; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.explore-header { height: 58px; justify-content: space-between; position: sticky; top: 0; z-index: 5; padding: 0 8px; border-bottom: 1px solid var(--line); background: rgba(15, 15, 15, 0.96); backdrop-filter: blur(18px); }
 .explore-header h1 { margin: 0; font-size: 1.2rem; letter-spacing: -0.04em; }
 .explore-content { padding-top: 16px; }
 .explore-summary { margin-bottom: 16px; border: 1px solid var(--line); }
@@ -609,9 +643,9 @@ a:focus-visible {
 .empty-spark { font-size: 2rem; }
 
 .toast {
-  position: fixed;
+  position: absolute;
   z-index: 12;
-  bottom: 88px;
+  bottom: calc(var(--nav-block-size) + 12px);
   left: 50%;
   width: max-content;
   max-width: calc(100% - 32px);
@@ -650,21 +684,18 @@ a:focus-visible {
 }
 
 @media (min-width: 700px) {
-  .prototype-shell { padding: 28px 0; }
+  .prototype-shell { min-height: 100dvh; place-items: center; padding: 28px 0; }
   .app-frame {
     width: 390px;
-    min-height: 844px;
+    height: min(844px, calc(100dvh - 56px));
+    min-height: 0;
     border: 1px solid #3d3d3d;
     border-radius: 28px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
     overflow: hidden;
   }
-  .screen { min-height: 844px; }
-  .topbar,
-  .bottom-nav { width: 390px; left: auto; right: auto; }
-  .bottom-nav { position: absolute; bottom: auto; top: 800px; }
-  .app-frame { position: relative; }
-  .toast { position: absolute; bottom: 83px; }
+  .screen { min-height: 100%; }
+  .toast { bottom: calc(var(--nav-block-size) + 12px); }
 }
 
 @media (max-width: 355px) {
