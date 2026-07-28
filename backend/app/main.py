@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -43,6 +44,14 @@ class CreateHypeRequest(BaseModel):
 
 app = FastAPI(title="Hype Balance Backend Prototype")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:8000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 def get_timezone():
     return ZoneInfo(TIMEZONE_NAME)
@@ -60,7 +69,8 @@ def get_week_key(now=None):
         current_time = current_time.replace(tzinfo=timezone.utc)
 
     local_time = current_time.astimezone(get_timezone())
-    monday = local_time - timedelta(days=(local_time.weekday() + 6) % 7)
+    current_day = local_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    monday = current_day - timedelta(days=current_day.weekday())
     return monday.strftime("%Y-%m-%d")
 
 
@@ -74,7 +84,8 @@ def get_reset_time(now=None):
         current_time = current_time.replace(tzinfo=timezone.utc)
 
     local_time = current_time.astimezone(get_timezone())
-    current_week_monday = local_time - timedelta(days=(local_time.weekday() + 6) % 7)
+    current_day = local_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    current_week_monday = current_day - timedelta(days=current_day.weekday())
     next_week_monday = current_week_monday + timedelta(days=7)
     return next_week_monday.replace(hour=0, minute=0, second=0, microsecond=0)
 

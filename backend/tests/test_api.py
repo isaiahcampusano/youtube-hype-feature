@@ -1,6 +1,5 @@
 import importlib
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,6 +40,28 @@ def test_weekly_reset_restores_balance(client, monkeypatch):
     assert reset_state.status_code == 200
     assert reset_state.json()["remainingHypes"] == 3
     assert reset_state.json()["hypeHistory"] == []
+
+
+def test_week_boundary_sunday_to_monday_uses_next_week(client, monkeypatch):
+    monkeypatch.setattr("backend.app.main.get_current_datetime", lambda now=None: datetime(2026, 8, 2, 23, 59, tzinfo=timezone.utc))
+    monkeypatch.setattr("backend.app.main.get_timezone", lambda: timezone.utc)
+
+    state = client.get("/api/hype-state/demo-user")
+    payload = state.json()
+
+    assert payload["weekKey"] == "2026-07-27"
+    assert payload["remainingHypes"] == 3
+
+
+def test_week_boundary_monday_to_tuesday_stays_in_same_week(client, monkeypatch):
+    monkeypatch.setattr("backend.app.main.get_current_datetime", lambda now=None: datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("backend.app.main.get_timezone", lambda: timezone.utc)
+
+    state = client.get("/api/hype-state/demo-user")
+    payload = state.json()
+
+    assert payload["weekKey"] == "2026-08-03"
+    assert payload["remainingHypes"] == 3
 
 
 def test_repeat_hypes_are_allowed_on_same_video(client):

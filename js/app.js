@@ -351,13 +351,23 @@ app.addEventListener("click", async (event) => {
     let result;
     if (backendResult.ok) {
       const backendState = backendResult.data;
-      result = { ok: true, state: { remainingHypes: backendState.remainingHypes }, backendState };
+      const syncedState = {
+        ...getState(),
+        remainingHypes: backendState.remainingHypes,
+        weekKey: backendState.weekKey,
+        hypeEvents: (backendState.hypeHistory || []).map((entry) => ({
+          videoId: entry.videoId,
+          timestamp: entry.timestamp,
+        })),
+        dismissedBalanceCard: false,
+      };
+      localStorage.setItem("hype-balance-concept-state-v1", JSON.stringify(syncedState));
+      result = { ok: true, state: { remainingHypes: backendState.remainingHypes, hypeEvents: syncedState.hypeEvents }, backendState };
       lastHypeResult = {
         usedBackend: true,
         backendState: {
           ...backendState,
           mockPointsTotal: getFallbackMockPoints(backendState.hypeHistory || []),
-          resetTime: new Date().toISOString(),
         },
       };
     } else {
