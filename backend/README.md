@@ -1,51 +1,20 @@
-# Hype Balance Backend Prototype
+# Backend
 
-This backend is a local-only FastAPI service that models the same weekly Hype rules as the frontend prototype.
+The local FastAPI service is the authoritative implementation of the Hype prototype’s quota and experiment rules.
 
-## What it provides
+## Endpoints
 
-- A health endpoint for local verification
-- A demo-user Hype state endpoint
-- A Hype creation endpoint that enforces the three-Hypes-per-week rule
-- A demo reset endpoint for local testing
+- `GET /health`
+- `GET /api/hype-state/{user_id}`
+- `POST /api/hypes`
+- `GET /api/hype/queue?userId=...`
+- `POST /api/hype/undo`
+- `POST /api/hype/reassign`
+- `GET /api/badges?userId=...`
+- `POST /api/reset-demo`
 
-## Local setup
+Start from the repository root with `python -m uvicorn backend.app.main:app --reload`. OpenAPI documentation is available at `/docs` and `/redoc`.
 
-1. Open a terminal in this folder.
-2. Create and activate a Python 3.11+ virtual environment.
-3. Install dependencies:
+For local development, tables are created automatically. `migrations/001_tightened_features.sql` documents the upgrade shape for an existing prototype database; use a reviewed migration tool and backfill plan for production.
 
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Start the API:
-
-   ```bash
-   uvicorn backend.app.main:app --reload
-   ```
-
-5. Visit the API docs at:
-
-   - http://127.0.0.1:8000/docs
-   - http://127.0.0.1:8000/redoc
-
-## Environment variables
-
-- `DATABASE_URL`: SQLite connection string. Defaults to `sqlite:///./backend/hype.db`.
-- `TIMEZONE`: IANA timezone name. Defaults to `America/New_York`.
-
-## Prototype notes
-
-- This project does not connect to YouTube, Google, or any external service.
-- The backend is intentionally simple and is meant to be a stepping stone for later frontend integration.
-- The frontend should keep using its existing localStorage logic until the API is wired up.
-
-## Future integration plan
-
-When the frontend is ready to use the backend:
-
-1. Add a small API helper module in the frontend that calls the FastAPI endpoints.
-2. Replace the existing localStorage-based Hype actions with API calls while keeping the UI intact.
-3. Keep the current UI and page structure unchanged.
-4. Continue to use the backend as the source of truth for balance and history.
+Security note: the prototype accepts a user ID from the request to simplify demonstration. A production service must take identity from authentication, restrict CORS, use a production database, and implement the concurrency controls in `docs/TECH_DESIGN.md`.

@@ -1,17 +1,35 @@
 # Manual test checklist
 
-Run these checks in a modern browser with site storage enabled.
+Run the API and static client, then test in a modern browser with storage enabled.
 
-- [ ] First visit starts with 3 Hypes.
-- [ ] Hype an eligible video: 3 becomes 2 and the Balance Card appears.
-- [ ] Hype the same eligible video again: 2 becomes 1.
-- [ ] Hype another eligible video: 1 becomes 0.
-- [ ] A fourth Hype is blocked and the action is disabled.
-- [ ] Refresh after using a Hype; the balance and per-video Hype state persist.
-- [ ] Dismiss the Balance Card; a compact balance label remains when returning to that hyped video.
-- [ ] Open the Hype Explore view; its balance matches the Watch view.
-- [ ] Open the ineligible camera video; it cannot be hyped.
-- [ ] Use You → Reset prototype; cancel once, then confirm and verify 3 Hypes are restored.
-- [ ] Test keyboard navigation and visible focus states.
-- [ ] Enable reduced motion and confirm card animation is suppressed.
-- [ ] Test at 320 px, 390 px, and desktop widths; confirm no horizontal overflow.
+## Balance and schedule
+
+- [ ] Every eligible feed card shows remaining Hypes and a reset date before any Hype is used.
+- [ ] The Watch Hype button and Explore summary show the same balance.
+- [ ] A successful Hype updates every balance surface without a refresh.
+- [ ] Three standard-period Hypes exhaust the allowance and disable further allocation.
+- [ ] The experiment notice shows the assigned group and schedule.
+- [ ] With Weekend Bonus forced on a Friday–Sunday test clock, the UI shows unlimited Hypes (or 6 in `extra_3` mode).
+
+## Queue, undo, and reassign
+
+- [ ] A new Hype appears in Your space with creator, thumbnail, and countdown.
+- [ ] Undo succeeds before 24 hours and immediately restores one Hype.
+- [ ] Undo is disabled after 24 hours.
+- [ ] An undone row offers Reassign; the picker lists only eligible videos.
+- [ ] Reassign consumes the restored capacity and creates a new 24-hour window.
+- [ ] Refresh preserves active and undone queue entries when the API is running.
+
+## Badges and safety
+
+- [ ] Achievements show earned or locked state with threshold explanations.
+- [ ] Supporting three unique eligible videos awards Community Builder when badges are enabled.
+- [ ] The prototype uses only fictional creators, generic art, and mock points.
+- [ ] Reset prototype clears API and local demo history.
+
+## Accessibility and layout
+
+- [ ] Keyboard focus reaches all actions, the reassignment dialog, and its close button.
+- [ ] Status updates are announced by the live region.
+- [ ] At 320px, 390px, and desktop widths there is no horizontal page overflow.
+- [ ] With reduced motion enabled, transitions are suppressed.
