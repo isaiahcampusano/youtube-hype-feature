@@ -33,6 +33,7 @@ function newState(now = new Date()) {
     resetTime: getLocalResetTime(now, DEFAULT_EXPERIMENT.quotaSchedule).toISOString(),
     experiment: DEFAULT_EXPERIMENT,
     hypeEvents: [],
+    feedbackResponses: [],
     badges: [],
     dismissedBalanceCard: false,
   };
@@ -64,7 +65,13 @@ function normalize(state, now = new Date()) {
   if (!state) return newState(now);
   const experiment = { ...DEFAULT_EXPERIMENT, ...(state.experiment || {}) };
   const periodKey = getLocalPeriodKey(now, experiment.quotaSchedule);
-  if ((state.periodKey || state.weekKey) !== periodKey) return { ...newState(now), experiment, periodKey };
+  if ((state.periodKey || state.weekKey) !== periodKey) return {
+    ...newState(now),
+    experiment,
+    periodKey,
+    badges: Array.isArray(state.badges) ? state.badges : [],
+    feedbackResponses: Array.isArray(state.feedbackResponses) ? state.feedbackResponses : [],
+  };
   const events = (Array.isArray(state.hypeEvents) ? state.hypeEvents : []).map((event, index) => ({
     eventId: event.eventId ?? `local-${index}-${event.timestamp || Date.now()}`,
     videoId: event.videoId,
@@ -79,6 +86,7 @@ function normalize(state, now = new Date()) {
     periodKey,
     experiment,
     hypeEvents: events,
+    feedbackResponses: Array.isArray(state.feedbackResponses) ? state.feedbackResponses : [],
     badges: Array.isArray(state.badges) ? state.badges : [],
     unlimitedHypes: limit === null,
     remainingHypes: limit === null ? null : Math.max(0, limit - activeCount),
@@ -105,6 +113,9 @@ function awardLocalBadges(state) {
 
 export function hypeVideo(videoId, now = new Date()) {
   const state = getState(now);
+  if (state.hypeEvents.some((event) => event.videoId === videoId)) {
+    return { ok: false, reason: "already_hyped", state };
+  }
   if (!state.unlimitedHypes && state.remainingHypes <= 0) return { ok: false, reason: "empty", state };
   const next = awardLocalBadges({
     ...state,
@@ -158,6 +169,19 @@ export function syncBadges(items = []) {
 export function syncQueue(items = []) {
   const state = getState();
   return save(normalize({ ...state, hypeEvents: items }));
+}
+
+export function saveFeedbackResponse({ videoId, reasons, additionalFeedback = "" }, now = new Date()) {
+  const state = getState(now);
+  const response = {
+    feedbackId: `local-feedback-${now.getTime()}-${Math.random().toString(16).slice(2)}`,
+    videoId,
+    reasons: [...reasons],
+    additionalFeedback: additionalFeedback.trim(),
+    timestamp: now.toISOString(),
+  };
+  save({ ...state, feedbackResponses: [...state.feedbackResponses, response] });
+  return response;
 }
 
 export function dismissBalanceCard() {

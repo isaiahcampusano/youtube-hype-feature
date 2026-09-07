@@ -10,6 +10,7 @@ The local FastAPI service is the authoritative implementation of the Hype protot
 - `GET /api/hype/queue?userId=...`
 - `POST /api/hype/undo`
 - `POST /api/hype/reassign`
+- `POST /api/feedback`
 - `GET /api/badges?userId=...`
 - `POST /api/reset-demo`
 

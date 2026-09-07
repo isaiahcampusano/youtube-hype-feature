@@ -36,6 +36,7 @@ Weekend Bonus has two configurable modes: unlimited Hypes Friday through Sunday,
 - I can undo an active Hype until 24 hours after creation; after expiration the action is disabled.
 - Undo restores quota immediately. I can reassign that capacity to another eligible video.
 - Retries with the same idempotency key do not create duplicate Hypes.
+- A viewer cannot Hype the same video twice in one quota period, including after undo.
 
 ### Schedule experiment
 
@@ -107,7 +108,7 @@ All groups receive the persistent counter so schedule and recovery effects are n
 
 ## Technical requirements
 
-The API provides `GET /api/hype-state/{user_id}`, `POST /api/hypes`, `GET /api/hype/queue`, `POST /api/hype/undo`, `POST /api/hype/reassign`, and `GET /api/badges`. Persistent entities are user settings, Hype events, badge definitions, user badges, and analytics events. The client polls on load and retains a local fallback for the standalone demo. See `TECH_DESIGN.md` for production controls.
+The API provides `GET /api/hype-state/{user_id}`, `POST /api/hypes`, `GET /api/hype/queue`, `POST /api/hype/undo`, `POST /api/hype/reassign`, `POST /api/feedback`, and `GET /api/badges`. Persistent entities are user settings, Hype events, feedback responses, badge definitions, user badges, and analytics events. The client polls on load and retains a local fallback for the standalone demo. See `TECH_DESIGN.md` for production controls.
 
 ## Launch stages
 

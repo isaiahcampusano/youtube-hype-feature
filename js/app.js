@@ -6,6 +6,7 @@ import {
   hypeVideo,
   reassignHype,
   resetPrototype,
+  saveFeedbackResponse,
   syncBackendState,
   syncBadges,
   syncQueue,
@@ -23,8 +24,11 @@ import {
   reassignHypeOnBackend,
   resetBackendDemo,
   submitHypeToBackend,
+  submitFeedbackToBackend,
   undoHypeOnBackend,
 } from "./hype-backend.js";
+import { FeedbackModal } from "./components/FeedbackModal.js";
+import { getHypeControlState, renderHypeControl, shouldOpenFeedbackSurvey } from "./hype-ui.js";
 
 const app = document.querySelector("#app");
 const liveRegion = document.querySelector("#live-region");
@@ -41,6 +45,7 @@ let toastTimer;
 let pendingFocusSelector = "";
 let lastHypeResult = null;
 let pendingReassignEventId = null;
+let feedbackVideoId = null;
 
 const icon = (name, size = 20) => {
   const icons = {
@@ -259,11 +264,7 @@ function watchView() {
   // A dismissed card stays compactly represented when the viewer returns to a video
   // they have hyped, including after a refresh, while the full card stays session-led.
   const compactBalance = state.dismissedBalanceCard && hypeCount > 0;
-  const eligibleLabel = !video.eligible
-    ? "Not eligible"
-    : !state.unlimitedHypes && state.remainingHypes === 0
-      ? "No Hypes left"
-      : hypeCount > 0 ? "Hype again" : "Hype";
+  const hypeControl = getHypeControlState(video, state, hypeCount);
   const related = videos.filter((item) => item.id !== video.id).slice(0, 3);
   return `<section class="screen">
     <header class="topbar watch-topbar"><button class="back-button" data-back aria-label="Back to Home">${icon("back")}</button><div class="brand"><span>Now watching</span></div><div class="topbar-actions"><button class="icon-button" data-toast="More options are outside this focused concept." aria-label="More video options">•••</button></div></header>
@@ -277,7 +278,7 @@ function watchView() {
       </div>
       <div class="watch-action-row" aria-label="Video actions">
         <button class="action-button" data-like="${video.id}" aria-pressed="${isLiked}">${icon("like", 18)}<span>${isLiked ? "Liked" : "Like"}</span></button>
-        <button class="action-button hype-button" data-hype="${video.id}" ${!video.eligible || (!state.unlimitedHypes && state.remainingHypes === 0) ? "disabled" : ""} aria-label="${eligibleLabel} ${video.title}; ${remainingLabel(state)}">${icon("sparkle", 18)}<span>${eligibleLabel}<small>${remainingLabel(state, true)}</small></span></button>
+        ${renderHypeControl({ control: hypeControl, video, remainingText: remainingLabel(state, true), resetText: resetLabel(state), iconMarkup: icon("sparkle", 18) })}
         <button class="action-button" data-toast="Share is intentionally not connected in this concept.">${icon("share", 18)}<span>Share</span></button>
         <button class="action-button" data-toast="Downloads are intentionally not connected in this concept.">${icon("download", 18)}<span>Download</span></button>
       </div>
@@ -331,7 +332,9 @@ function achievements(state) {
 
 function reassignDialog() {
   if (!pendingReassignEventId) return "";
-  return `<div class="modal-backdrop" role="presentation"><section class="reassign-modal" role="dialog" aria-modal="true" aria-labelledby="reassign-title"><div class="card-heading"><h2 id="reassign-title">Choose a new video</h2><button class="dismiss-button" data-close-reassign aria-label="Close">${icon("close", 18)}</button></div><p class="support-copy">Your returned Hype will be applied immediately.</p><div class="reassign-list">${videos.filter((video) => video.eligible).map((video) => `<button data-reassign-video="${video.id}">${avatar(video)}<span><strong>${video.title}</strong><small>${video.creator}</small></span></button>`).join("")}</div></section></div>`;
+  const state = getState();
+  const eligibleVideos = videos.filter((video) => video.eligible && !state.hypeEvents.some((event) => event.videoId === video.id));
+  return `<div class="modal-backdrop" role="presentation"><section class="reassign-modal" role="dialog" aria-modal="true" aria-labelledby="reassign-title"><div class="card-heading"><h2 id="reassign-title">Choose a new video</h2><button class="dismiss-button" data-close-reassign aria-label="Close">${icon("close", 18)}</button></div><p class="support-copy">Your returned Hype will be applied immediately.</p><div class="reassign-list">${eligibleVideos.length ? eligibleVideos.map((video) => `<button data-reassign-video="${video.id}">${avatar(video)}<span><strong>${video.title}</strong><small>${video.creator}</small></span></button>`).join("") : `<p class="support-copy">You have already hyped every eligible video in this period.</p>`}</div></section></div>`;
 }
 
 function youView() {
@@ -354,7 +357,7 @@ function youView() {
 
 function render() {
   const views = { home: homeView, watch: watchView, explore: exploreView, you: youView };
-  app.innerHTML = `<div class="app-layout"><div class="app-scroller">${views[currentView]()}</div>${bottomNav()}</div>${toastMessage ? `<div class="toast" role="status">${toastMessage}</div>` : ""}`;
+  app.innerHTML = `<div class="app-layout"><div class="app-scroller">${views[currentView]()}</div>${bottomNav()}</div>${FeedbackModal(getVideo(feedbackVideoId))}${toastMessage ? `<div class="toast" role="status">${toastMessage}</div>` : ""}`;
   applyPendingFocus();
 }
 
@@ -410,6 +413,11 @@ app.addEventListener("click", async (event) => {
     const beforeState = getState();
     track("hype_clicked", { videoId: video.id, remainingHypes: beforeState.remainingHypes });
     if (!video.eligible) return showToast("This video is not eligible for Hype in this concept.");
+    if (beforeState.hypeEvents.some((item) => item.videoId === video.id)) {
+      track("hype_blocked_duplicate", { videoId: video.id });
+      announce("You already hyped this video in the current period.");
+      return showToast("You already hyped this video.");
+    }
 
     const backendResult = await submitHypeToBackend(video.id);
     let result;
@@ -425,9 +433,14 @@ app.addEventListener("click", async (event) => {
           resetTime: backendState.resetTime,
         },
       };
-    } else {
+    } else if (backendResult.unavailable) {
       result = hypeVideo(video.id);
       if (!result.ok) {
+        if (result.reason === "already_hyped") {
+          track("hype_blocked_duplicate", { videoId: video.id });
+          announce("You already hyped this video in the current period.");
+          return showToast("You already hyped this video.");
+        }
         track("hype_blocked_zero_balance", { videoId: video.id });
         announce(`All free Hypes have been used. ${resetLabel(beforeState)}.`);
         return showToast("All free Hypes have been used for this period.");
@@ -436,20 +449,37 @@ app.addEventListener("click", async (event) => {
         usedBackend: false,
         fallbackState: { hypeEvents: result.state.hypeEvents },
       };
+    } else {
+      if (backendResult.code === "already_hyped") {
+        announce("You already hyped this video in the current period.");
+        return showToast("You already hyped this video.");
+      }
+      announce(backendResult.error.message);
+      return showToast(backendResult.error.message);
     }
     lastHypedVideoId = video.id;
     const { remainingHypes } = result.state;
     track("hype_succeeded", { videoId: video.id, remainingHypes });
     track("balance_card_viewed", { videoId: video.id, remainingHypes });
     announce(`${remainingHypes === null ? "Unlimited Hypes" : `${remainingHypes} Hypes left`}. ${resetLabel(result.state)}.`);
+    if (shouldOpenFeedbackSurvey(result)) {
+      feedbackVideoId = video.id;
+      setPendingFocus('[data-feedback-form] input[name="reason"]');
+    }
+    render();
+    return;
+  }
+  if (button.dataset.dismissFeedback !== undefined) {
+    feedbackVideoId = null;
+    announce("Feedback skipped.");
     render();
     return;
   }
   if (button.dataset.undoHype) {
     const eventId = button.dataset.undoHype;
-    const backendResult = /^\d+$/.test(eventId) ? await undoHypeOnBackend(eventId) : { ok: false };
-    const localResult = undoHype(eventId);
-    if (!backendResult.ok && !localResult.ok) return showToast("This Hype can no longer be undone.");
+    const backendResult = /^\d+$/.test(eventId) ? await undoHypeOnBackend(eventId) : { ok: false, unavailable: true };
+    const localResult = backendResult.unavailable ? undoHype(eventId) : { ok: false };
+    if (!backendResult.ok && !localResult.ok) return showToast(backendResult.error?.message || "This Hype can no longer be undone.");
     track("hype_undone", { eventId });
     announce("Hype undone. One Hype is available to reassign.");
     showToast("Hype returned — choose Reassign when ready.");
@@ -468,10 +498,10 @@ app.addEventListener("click", async (event) => {
   if (button.dataset.reassignVideo) {
     const eventId = pendingReassignEventId;
     const videoId = button.dataset.reassignVideo;
-    const backendResult = /^\d+$/.test(String(eventId)) ? await reassignHypeOnBackend(eventId, videoId) : { ok: false };
-    const localResult = reassignHype(eventId, videoId);
+    const backendResult = /^\d+$/.test(String(eventId)) ? await reassignHypeOnBackend(eventId, videoId) : { ok: false, unavailable: true };
+    const localResult = backendResult.unavailable ? reassignHype(eventId, videoId) : { ok: false };
     if (backendResult.ok) syncBackendState(backendResult.data);
-    if (!backendResult.ok && !localResult.ok) return showToast("That Hype could not be reassigned.");
+    if (!backendResult.ok && !localResult.ok) return showToast(backendResult.error?.message || "That Hype could not be reassigned.");
     pendingReassignEventId = null;
     track("hype_reassigned", { eventId, videoId });
     announce("Hype reassigned successfully.");
@@ -503,10 +533,33 @@ app.addEventListener("click", async (event) => {
     resetPrototype();
     await resetBackendDemo();
     lastHypedVideoId = null;
+    feedbackVideoId = null;
     track("prototype_reset");
     announce("Prototype reset. You now have three free Hypes this week.");
     showToast("Prototype reset — 3 Hypes restored.");
   }
+});
+
+app.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-feedback-form]");
+  if (!form) return;
+  event.preventDefault();
+  const data = new FormData(form);
+  const reasons = data.getAll("reason");
+  const error = form.querySelector("[data-feedback-error]");
+  if (!reasons.length) {
+    error.hidden = false;
+    form.querySelector('input[name="reason"]')?.focus();
+    return;
+  }
+  const videoId = form.dataset.videoId;
+  const additionalFeedback = String(data.get("additionalFeedback") || "");
+  const backendResult = await submitFeedbackToBackend(videoId, reasons, additionalFeedback);
+  saveFeedbackResponse({ videoId, reasons, additionalFeedback });
+  feedbackVideoId = null;
+  track("feedback_submitted", { videoId, reasons, storedOnBackend: backendResult.ok });
+  announce("Thank you. Your feedback was recorded.");
+  showToast("Thanks for the feedback.");
 });
 
 render();

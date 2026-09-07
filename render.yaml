@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: youtube-hype-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////var/data/hype.db
+      - key: HYPE_EXPERIMENT_ENABLED
+        value: "true"
+      - key: HYPE_WEEKEND_BONUS_MODE
+        value: unlimited
+    disk:
+      name: hype-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -7,6 +7,8 @@ A copyright-safe, fictional video product concept exploring clearer Hype quotas,
 - Remaining Hypes and an exact localized reset date appear in the feed, watch view, and Explore view.
 - Stable A/B assignment supports control, Weekend Bonus, undo, combined, and badges treatments.
 - The profile includes an experiment notice, current-period Hype queue, countdowns, undo, reassignment, and achievements.
+- Each eligible video can receive only one Hype from a viewer per quota period.
+- After a successful Hype, an optional feedback survey records why the viewer chose it.
 - The FastAPI service enforces quotas, stores soft-deleted events, prevents request replay, awards badges, and logs experiment events.
 - A local browser store keeps the static prototype functional when the API is offline.
 - All thumbnails, creators, activity, points, and brand elements are generic mock content.
@@ -35,6 +37,7 @@ python -m pytest backend/tests -q
 node --check js/app.js
 node --check js/hype-store.js
 node --check js/hype-backend.js
+npm test
 ```
 
 ## Configuration

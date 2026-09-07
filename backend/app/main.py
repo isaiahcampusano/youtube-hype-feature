@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -7,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -36,7 +37,10 @@ class UserSettings(Base):
 
 class HypeEvent(Base):
     __tablename__ = "hype_events"
-    __table_args__ = (UniqueConstraint("user_id", "idempotency_key", name="uq_hype_idempotency"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_hype_idempotency"),
+        UniqueConstraint("user_id", "video_id", "period_key", name="uq_hype_video_per_period"),
+    )
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, nullable=False, index=True)
     video_id = Column(String, nullable=False)
@@ -73,6 +77,16 @@ class AnalyticsEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class FeedbackResponse(Base):
+    __tablename__ = "feedback_responses"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    video_id = Column(String, nullable=False)
+    reasons_json = Column(Text, nullable=False)
+    additional_feedback = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class CreateHypeRequest(BaseModel):
     userId: str = Field(min_length=1)
     videoId: str = Field(min_length=1)
@@ -88,6 +102,13 @@ class EventRequest(BaseModel):
 class ReassignRequest(EventRequest):
     videoId: str = Field(min_length=1)
     idempotencyKey: Optional[str] = None
+
+
+class FeedbackRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    videoId: str = Field(min_length=1)
+    reasons: list[str] = Field(min_length=1, max_length=4)
+    additionalFeedback: Optional[str] = Field(default=None, max_length=500)
 
 
 app = FastAPI(title="Hype Balance Prototype API", version="2.0.0")
@@ -194,6 +215,13 @@ def active_events(db, settings: UserSettings, now: Optional[datetime] = None):
     ).order_by(HypeEvent.created_at.asc()).all()
 
 
+def video_already_hyped(db, settings: UserSettings, video_id: str, now: Optional[datetime] = None) -> bool:
+    key = period_start(settings, now).date().isoformat()
+    return db.query(HypeEvent).filter_by(
+        user_id=settings.user_id, video_id=video_id, period_key=key
+    ).first() is not None
+
+
 def serialize_event(event: HypeEvent, now: Optional[datetime] = None) -> dict:
     current = as_utc(now or utc_now())
     expiry = as_utc(event.undo_expires_at)
@@ -277,6 +305,11 @@ def create_hype(payload: CreateHypeRequest):
             existing = db.query(HypeEvent).filter_by(user_id=payload.userId, idempotency_key=payload.idempotencyKey).first()
             if existing:
                 return state_payload(db, settings)
+        if video_already_hyped(db, settings, payload.videoId):
+            raise HTTPException(status_code=409, detail={
+                "code": "already_hyped",
+                "message": "You already hyped this video in the current quota period.",
+            })
         events = active_events(db, settings)
         limit = quota_limit(settings)
         if limit is not None and len(events) >= limit:
@@ -288,7 +321,14 @@ def create_hype(payload: CreateHypeRequest):
             undo_expires_at=now + timedelta(hours=24), idempotency_key=payload.idempotencyKey,
         ))
         log_event(db, settings, "hype_created")
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError as error:
+            db.rollback()
+            raise HTTPException(status_code=409, detail={
+                "code": "already_hyped",
+                "message": "You already hyped this video in the current quota period.",
+            }) from error
         award_badges(db, settings)
         db.commit()
         return state_payload(db, settings)
@@ -335,6 +375,11 @@ def reassign_hype(payload: ReassignRequest):
             existing = db.query(HypeEvent).filter_by(user_id=payload.userId, idempotency_key=payload.idempotencyKey).first()
             if existing:
                 return state_payload(db, settings)
+        if video_already_hyped(db, settings, payload.videoId):
+            raise HTTPException(status_code=409, detail={
+                "code": "already_hyped",
+                "message": "Choose a video you have not hyped in this quota period.",
+            })
         events = active_events(db, settings)
         limit = quota_limit(settings)
         if limit is not None and len(events) >= limit:
@@ -351,6 +396,31 @@ def reassign_hype(payload: ReassignRequest):
         award_badges(db, settings)
         db.commit()
         return state_payload(db, settings)
+
+
+@app.post("/api/feedback", status_code=201)
+def create_feedback(payload: FeedbackRequest):
+    allowed_reasons = {
+        "Loved the content",
+        "Supporting a small creator",
+        "Quality was exceptional",
+        "Other",
+    }
+    if any(reason not in allowed_reasons for reason in payload.reasons):
+        raise HTTPException(status_code=422, detail="One or more feedback reasons are invalid.")
+    with SessionLocal() as db:
+        settings = get_or_create_settings(db, payload.userId)
+        response = FeedbackResponse(
+            user_id=payload.userId,
+            video_id=payload.videoId,
+            reasons_json=json.dumps(payload.reasons),
+            additional_feedback=(payload.additionalFeedback or "").strip() or None,
+            created_at=utc_now(),
+        )
+        db.add(response)
+        log_event(db, settings, "feedback_submitted")
+        db.commit()
+        return {"status": "recorded", "feedbackId": response.id}
 
 
 @app.get("/api/badges")
@@ -370,5 +440,6 @@ def reset_demo():
         db.query(HypeEvent).filter(HypeEvent.user_id == "demo-user").delete()
         db.query(UserBadge).filter(UserBadge.user_id == "demo-user").delete()
         db.query(AnalyticsEvent).filter(AnalyticsEvent.user_id == "demo-user").delete()
+        db.query(FeedbackResponse).filter(FeedbackResponse.user_id == "demo-user").delete()
         db.commit()
         return {"status": "ok", "message": "Demo Hype data cleared."}

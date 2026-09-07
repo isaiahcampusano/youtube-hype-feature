@@ -7,7 +7,9 @@ Run the API and static client, then test in a modern browser with storage enable
 - [ ] Every eligible feed card shows remaining Hypes and a reset date before any Hype is used.
 - [ ] The Watch Hype button and Explore summary show the same balance.
 - [ ] A successful Hype updates every balance surface without a refresh.
-- [ ] Three standard-period Hypes exhaust the allowance and disable further allocation.
+- [ ] Three different standard-period Hypes exhaust the allowance and prevent further allocation.
+- [ ] At zero balance, the Hype button is absent and a reset message is shown.
+- [ ] After Hyping a video once, its action reads “Hyped ✓” and cannot be used again that period.
 - [ ] The experiment notice shows the assigned group and schedule.
 - [ ] With Weekend Bonus forced on a Friday–Sunday test clock, the UI shows unlimited Hypes (or 6 in `extra_3` mode).
 
@@ -26,6 +28,14 @@ Run the API and static client, then test in a modern browser with storage enable
 - [ ] Supporting three unique eligible videos awards Community Builder when badges are enabled.
 - [ ] The prototype uses only fictional creators, generic art, and mock points.
 - [ ] Reset prototype clears API and local demo history.
+
+## Feedback
+
+- [ ] Every successful Hype opens the optional feedback modal.
+- [ ] Submitting without a reason shows an inline validation message.
+- [ ] One or more reasons and optional text can be submitted.
+- [ ] Skip closes the modal without changing Hype state.
+- [ ] A recorded response appears in API storage when the backend is configured, and local storage otherwise.
 
 ## Accessibility and layout
 

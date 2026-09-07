@@ -67,6 +67,11 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .action-button { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; min-height: 42px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer; }
 .action-button small { display: block; color: var(--accent); font-size: 9px; }
 .hype-button { border-color: rgba(139,240,196,.45); }
+.hype-button.is-hyped { border-color: rgba(139,240,196,.55); background: rgba(139,240,196,.1); color: var(--accent); }
+.quota-exhausted { display: grid; flex: 0 0 auto; align-content: center; min-height: 42px; padding: 6px 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); }
+.quota-exhausted strong, .quota-exhausted small { display: block; }
+.quota-exhausted strong { font-size: 12px; }
+.quota-exhausted small { margin-top: 2px; color: var(--muted); font-size: 9px; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 .balance-card, .hype-feedback-card, .how-it-works, .description-box, .you-panel, .experiment-banner, .explore-summary { margin: 14px 0; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .balance-card { border-color: rgba(139,240,196,.4); background: linear-gradient(145deg, rgba(139,240,196,.11), var(--surface) 62%); }
@@ -115,6 +120,19 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .danger-button { border-color: rgba(255,126,136,.5); background: transparent; color: var(--danger); }
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: end center; padding: 20px; background: rgba(0,0,0,.72); }
 .reassign-modal { width: min(100%, 540px); max-height: 80vh; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); }
+.feedback-modal { width: min(100%, 540px); max-height: 90vh; overflow: auto; padding: 22px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.55); }
+.feedback-modal h2 { margin: 2px 0; font-size: 22px; }
+.feedback-options { display: grid; gap: 9px; margin: 16px 0; padding: 0; border: 0; }
+.feedback-options label { display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); cursor: pointer; }
+.feedback-options label:has(input:checked) { border-color: var(--accent); background: rgba(139,240,196,.09); }
+.feedback-options input { width: 18px; height: 18px; accent-color: var(--accent); }
+.feedback-notes, .feedback-notes span { display: block; }
+.feedback-notes span { margin-bottom: 7px; font-weight: 700; }
+.feedback-notes small { color: var(--muted); font-weight: 400; }
+.feedback-notes textarea { width: 100%; resize: vertical; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--text); font: inherit; }
+.feedback-notes textarea::placeholder { color: var(--muted); }
+.feedback-error { margin: 8px 0 0; color: var(--danger); font-size: 12px; }
+.feedback-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 16px; }
 .reassign-list { display: grid; gap: 8px; }
 .reassign-list button { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; width: 100%; padding: 11px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); text-align: left; cursor: pointer; }
 .reassign-list small { display: block; margin-top: 3px; color: var(--muted); }

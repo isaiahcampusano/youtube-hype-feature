@@ -45,6 +45,26 @@ def test_idempotency_prevents_duplicate_hype(api):
     assert len(retry.json()["hypeHistory"]) == 1
 
 
+def test_same_video_can_only_be_hyped_once_per_period(api):
+    client, _ = api
+    assert create_hype(client, "video-001").status_code == 200
+    duplicate = create_hype(client, "video-001")
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "already_hyped"
+    state = client.get("/api/hype-state/demo-user?timezone=UTC").json()
+    assert state["remainingHypes"] == 2
+    assert len(state["hypeHistory"]) == 1
+
+
+def test_concurrent_duplicate_hypes_are_rejected(api):
+    client, _ = api
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda key: create_hype(client, "video-002", key), ["race-a", "race-b"]))
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    state = client.get("/api/hype-state/demo-user?timezone=UTC").json()
+    assert [event["videoId"] for event in state["hypeHistory"]] == ["video-002"]
+
+
 def test_undo_restores_quota_and_reassigns(api):
     client, _ = api
     event_id = create_hype(client, "video-001").json()["hypeHistory"][0]["eventId"]
@@ -70,6 +90,17 @@ def test_expired_hype_cannot_be_undone(api, monkeypatch):
     assert response.status_code == 410
 
 
+def test_undone_video_cannot_be_selected_again_in_same_period(api):
+    client, _ = api
+    event_id = create_hype(client, "video-001").json()["hypeHistory"][0]["eventId"]
+    assert client.post("/api/hype/undo", json={"userId": "demo-user", "eventId": event_id}).status_code == 200
+    duplicate = client.post("/api/hype/reassign", json={
+        "userId": "demo-user", "eventId": event_id, "videoId": "video-001",
+    })
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "already_hyped"
+
+
 def test_weekend_schedule_is_timezone_aware_and_unlimited(api, monkeypatch):
     client, main = api
     with main.SessionLocal() as db:
@@ -91,6 +122,27 @@ def test_badges_are_awarded_and_exposed(api):
     badges = client.get("/api/badges?userId=demo-user").json()
     assert badges["enabled"] is True
     assert {item["slug"] for item in badges["items"]} == {"community-builder", "trendspotter"}
+
+
+def test_feedback_is_validated_and_recorded(api):
+    client, main = api
+    response = client.post("/api/feedback", json={
+        "userId": "demo-user",
+        "videoId": "video-001",
+        "reasons": ["Loved the content", "Supporting a small creator"],
+        "additionalFeedback": "The creator explained the process clearly.",
+    })
+    assert response.status_code == 201
+    assert response.json()["status"] == "recorded"
+    with main.SessionLocal() as db:
+        stored = db.query(main.FeedbackResponse).one()
+        assert stored.video_id == "video-001"
+        assert "Loved the content" in stored.reasons_json
+
+    invalid = client.post("/api/feedback", json={
+        "userId": "demo-user", "videoId": "video-001", "reasons": ["Invalid option"],
+    })
+    assert invalid.status_code == 422
 
 
 def test_deterministic_experiment_assignment(api):

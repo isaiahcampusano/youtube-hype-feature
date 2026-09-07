@@ -1,0 +1,9 @@
+{
+  "name": "hype-balance-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/frontend.test.mjs",
+    "check": "node --check js/app.js && node --check js/hype-store.js && node --check js/hype-backend.js && node --check js/hype-ui.js && node --check js/components/FeedbackModal.js"
+  }
+}

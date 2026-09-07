@@ -11,6 +11,7 @@ The FastAPI service is the source of truth for quota, experiment assignment, Hyp
 - `badges`: badge definitions.
 - `user_badges`: unique user/badge awards.
 - `analytics_events`: assignment and action event names with group and server timestamp.
+- `feedback_responses`: selected survey reasons, optional text, video, viewer, and server timestamp.
 
 The checked-in SQL is a reference migration. A production database should use a reviewed Alembic migration, backfill `undo_expires_at`, and validate rows before making the column non-null.
 
@@ -29,13 +30,14 @@ Friday Weekend Bonus is environment-configurable as `unlimited` or `extra_3`. Th
 | `GET /api/hype/queue` | Active and undone events for the period | 200 |
 | `POST /api/hype/undo` | Soft-delete within 24 hours | 200, 403 disabled, 410 expired |
 | `POST /api/hype/reassign` | Allocate after undo | 200, 409 invalid state/quota |
+| `POST /api/feedback` | Store optional post-Hype survey response | 201, 422 invalid reason |
 | `GET /api/badges` | Earned badges and visibility | 200 |
 
 The prototype identifies the user in the body/query for simplicity. Production must derive the user from an authenticated session and reject mismatched identifiers.
 
 ## Duplicate prevention
 
-The client sends a unique idempotency key for Hype and reassign commands. A unique `(user_id, idempotency_key)` index makes retries return the already-resulting state. Production should retain keys at least as long as request retries are plausible, return the original response body, and reject reuse with a different payload hash.
+The client sends a unique idempotency key for Hype and reassign commands. A unique `(user_id, idempotency_key)` index makes retries return the already-resulting state. A second unique constraint on `(user_id, video_id, period_key)` prevents the same viewer from Hyping a video twice, even when concurrent requests use different keys. Production should retain keys at least as long as request retries are plausible, return the original response body, and reject reuse with a different payload hash.
 
 ## Concurrency
 

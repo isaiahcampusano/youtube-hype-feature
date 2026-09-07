@@ -15,6 +15,7 @@ ALTER TABLE hype_events ADD COLUMN undo_expires_at DATETIME;
 ALTER TABLE hype_events ADD COLUMN idempotency_key VARCHAR;
 ALTER TABLE hype_events ADD COLUMN reassigned_from_id INTEGER;
 CREATE UNIQUE INDEX uq_hype_idempotency ON hype_events(user_id, idempotency_key);
+CREATE UNIQUE INDEX uq_hype_video_per_period ON hype_events(user_id, video_id, period_key);
 
 CREATE TABLE badges (slug VARCHAR PRIMARY KEY, name VARCHAR NOT NULL, description VARCHAR NOT NULL);
 CREATE TABLE user_badges (
@@ -29,5 +30,14 @@ CREATE TABLE analytics_events (
   user_id VARCHAR NOT NULL,
   name VARCHAR NOT NULL,
   experiment_group VARCHAR NOT NULL,
+  created_at DATETIME NOT NULL
+);
+
+CREATE TABLE feedback_responses (
+  id INTEGER PRIMARY KEY,
+  user_id VARCHAR NOT NULL,
+  video_id VARCHAR NOT NULL,
+  reasons_json TEXT NOT NULL,
+  additional_feedback TEXT,
   created_at DATETIME NOT NULL
 );
