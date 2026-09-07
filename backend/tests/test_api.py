@@ -1,4 +1,5 @@
 import importlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
@@ -101,3 +102,16 @@ def test_deterministic_experiment_assignment(api):
         assert main.assignment_for("stable-user") in main.EXPERIMENT_GROUPS
     finally:
         main.EXPERIMENT_ENABLED = original
+
+
+def test_parallel_first_load_creates_one_assignment(api):
+    client, main = api
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        responses = list(pool.map(lambda path: client.get(path), [
+            "/api/hype-state/race-user?timezone=UTC",
+            "/api/hype/queue?userId=race-user",
+            "/api/badges?userId=race-user",
+        ]))
+    assert all(response.status_code == 200 for response in responses)
+    with main.SessionLocal() as db:
+        assert db.query(main.UserSettings).filter_by(user_id="race-user").count() == 1

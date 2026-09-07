@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./backend/hype.db")
@@ -152,8 +153,14 @@ def get_or_create_settings(db, user_id: str, timezone_name: Optional[str] = None
     )
     db.add(settings)
     log_event(db, settings, "experiment_assigned")
-    db.commit()
-    return settings
+    try:
+        db.commit()
+        return settings
+    except IntegrityError:
+        # Parallel first-load requests may race to create the same stable assignment.
+        # The primary key is authoritative; use the row committed by the winner.
+        db.rollback()
+        return db.get(UserSettings, user_id)
 
 
 def local_now(settings: UserSettings, now: Optional[datetime] = None) -> datetime:
