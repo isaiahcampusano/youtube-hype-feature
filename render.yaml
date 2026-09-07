@@ -8,12 +8,8 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: sqlite:////var/data/hype.db
+        value: sqlite:////tmp/hype.db
       - key: HYPE_EXPERIMENT_ENABLED
         value: "true"
       - key: HYPE_WEEKEND_BONUS_MODE
         value: unlimited
-    disk:
-      name: hype-data
-      mountPath: /var/data
-      sizeGB: 1
