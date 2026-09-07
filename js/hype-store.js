@@ -1,25 +1,39 @@
-const STORAGE_KEY = "hype-balance-concept-state-v1";
+const STORAGE_KEY = "hype-balance-concept-state-v2";
 const DEFAULT_REMAINING_HYPES = 3;
+const DEFAULT_EXPERIMENT = {
+  group: "undo",
+  quotaSchedule: "default",
+  undoEnabled: true,
+  badgesEnabled: false,
+  weekendBonusMode: "unlimited",
+};
 
 function dateToKey(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function getLocalWeekKey(now = new Date()) {
-  const localDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const daysSinceMonday = (localDate.getDay() + 6) % 7;
-  localDate.setDate(localDate.getDate() - daysSinceMonday);
-  return dateToKey(localDate);
+export function getLocalPeriodKey(now = new Date(), schedule = "default") {
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const anchor = schedule === "weekend_bonus" ? 5 : 1;
+  date.setDate(date.getDate() - ((date.getDay() - anchor + 7) % 7));
+  return dateToKey(date);
+}
+
+export function getLocalResetTime(now = new Date(), schedule = "default") {
+  const start = new Date(`${getLocalPeriodKey(now, schedule)}T00:00:00`);
+  start.setDate(start.getDate() + 7);
+  return start;
 }
 
 function newState(now = new Date()) {
   return {
-    weekKey: getLocalWeekKey(now),
+    periodKey: getLocalPeriodKey(now, DEFAULT_EXPERIMENT.quotaSchedule),
     remainingHypes: DEFAULT_REMAINING_HYPES,
+    unlimitedHypes: false,
+    resetTime: getLocalResetTime(now, DEFAULT_EXPERIMENT.quotaSchedule).toISOString(),
+    experiment: DEFAULT_EXPERIMENT,
     hypeEvents: [],
+    badges: [],
     dismissedBalanceCard: false,
   };
 }
@@ -29,53 +43,125 @@ function loadRaw() {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored ? JSON.parse(stored) : null;
   } catch (error) {
-    console.warn("Could not read Hype Balance state", error);
+    console.warn("Could not read Hype state", error);
     return null;
   }
 }
 
 function save(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  window.dispatchEvent(new CustomEvent("hype-state-changed", { detail: state }));
   return state;
 }
 
-function normalize(state, now = new Date()) {
-  const currentWeekKey = getLocalWeekKey(now);
-  if (!state || state.weekKey !== currentWeekKey) return newState(now);
+function currentLimit(experiment, now) {
+  const weekend = experiment.quotaSchedule === "weekend_bonus" && [0, 5, 6].includes(now.getDay());
+  if (weekend && experiment.weekendBonusMode === "unlimited") return null;
+  return weekend ? 6 : DEFAULT_REMAINING_HYPES;
+}
 
+function normalize(state, now = new Date()) {
+  if (!state) return newState(now);
+  const experiment = { ...DEFAULT_EXPERIMENT, ...(state.experiment || {}) };
+  const periodKey = getLocalPeriodKey(now, experiment.quotaSchedule);
+  if ((state.periodKey || state.weekKey) !== periodKey) return { ...newState(now), experiment, periodKey };
+  const events = (Array.isArray(state.hypeEvents) ? state.hypeEvents : []).map((event, index) => ({
+    eventId: event.eventId ?? `local-${index}-${event.timestamp || Date.now()}`,
+    videoId: event.videoId,
+    timestamp: event.timestamp || new Date().toISOString(),
+    isActive: event.isActive !== false,
+    undoExpiresAt: event.undoExpiresAt || new Date(new Date(event.timestamp || now).getTime() + 86400000).toISOString(),
+  }));
+  const limit = currentLimit(experiment, now);
+  const activeCount = events.filter((event) => event.isActive).length;
   return {
-    weekKey: currentWeekKey,
-    remainingHypes: Math.max(0, Math.min(DEFAULT_REMAINING_HYPES, Number(state.remainingHypes) || 0)),
-    hypeEvents: Array.isArray(state.hypeEvents) ? state.hypeEvents : [],
+    ...state,
+    periodKey,
+    experiment,
+    hypeEvents: events,
+    badges: Array.isArray(state.badges) ? state.badges : [],
+    unlimitedHypes: limit === null,
+    remainingHypes: limit === null ? null : Math.max(0, limit - activeCount),
+    resetTime: state.resetTime || getLocalResetTime(now, experiment.quotaSchedule).toISOString(),
     dismissedBalanceCard: Boolean(state.dismissedBalanceCard),
   };
 }
 
 export function getState(now = new Date()) {
-  const state = normalize(loadRaw(), now);
-  return save(state);
+  return save(normalize(loadRaw(), now));
+}
+
+function awardLocalBadges(state) {
+  const active = state.hypeEvents.filter((event) => event.isActive);
+  const badgeMap = new Map((state.badges || []).map((badge) => [badge.slug, badge]));
+  const award = (slug, name, description) => {
+    if (!badgeMap.has(slug)) badgeMap.set(slug, { slug, name, description, awardedAt: new Date().toISOString() });
+  };
+  if (active.length >= 10) award("supporter", "Supporter", "Used 10 Hypes to support emerging creators.");
+  if (new Set(active.map((event) => event.videoId)).size >= 3) award("community-builder", "Community Builder", "Supported at least 3 different creators.");
+  if (active.some((event) => ["video-001", "video-004"].includes(event.videoId))) award("trendspotter", "Trendspotter", "Hyped a video that reached the prototype leaderboard.");
+  return { ...state, badges: [...badgeMap.values()] };
 }
 
 export function hypeVideo(videoId, now = new Date()) {
   const state = getState(now);
-  if (state.remainingHypes <= 0) return { ok: false, reason: "empty", state };
-
-  const nextState = {
+  if (!state.unlimitedHypes && state.remainingHypes <= 0) return { ok: false, reason: "empty", state };
+  const next = awardLocalBadges({
     ...state,
-    remainingHypes: state.remainingHypes - 1,
     dismissedBalanceCard: false,
-    hypeEvents: [
-      ...state.hypeEvents,
-      { videoId, timestamp: now.toISOString() },
-    ],
-  };
+    hypeEvents: [...state.hypeEvents, {
+      eventId: `local-${now.getTime()}-${Math.random().toString(16).slice(2)}`,
+      videoId,
+      timestamp: now.toISOString(),
+      isActive: true,
+      undoExpiresAt: new Date(now.getTime() + 86400000).toISOString(),
+    }],
+  });
+  return { ok: true, state: save(normalize(next, now)) };
+}
 
-  return { ok: true, state: save(nextState) };
+export function undoHype(eventId, now = new Date()) {
+  const state = getState(now);
+  const target = state.hypeEvents.find((event) => String(event.eventId) === String(eventId));
+  if (!target || !target.isActive || new Date(target.undoExpiresAt) <= now) return { ok: false, state };
+  const next = { ...state, hypeEvents: state.hypeEvents.map((event) => String(event.eventId) === String(eventId) ? { ...event, isActive: false } : event) };
+  return { ok: true, state: save(normalize(next, now)) };
+}
+
+export function reassignHype(eventId, videoId, now = new Date()) {
+  const state = getState(now);
+  const target = state.hypeEvents.find((event) => String(event.eventId) === String(eventId));
+  if (!target || target.isActive) return { ok: false, state };
+  return hypeVideo(videoId, now);
+}
+
+export function syncBackendState(payload) {
+  if (!payload) return getState();
+  const prior = getState();
+  const next = normalize({
+    ...prior,
+    periodKey: payload.periodKey,
+    remainingHypes: payload.remainingHypes,
+    unlimitedHypes: payload.unlimitedHypes,
+    resetTime: payload.resetTime,
+    experiment: payload.experiment || prior.experiment,
+    hypeEvents: payload.hypeHistory || prior.hypeEvents,
+  });
+  return save(next);
+}
+
+export function syncBadges(items = []) {
+  const state = { ...getState(), badges: items };
+  return save(state);
+}
+
+export function syncQueue(items = []) {
+  const state = getState();
+  return save(normalize({ ...state, hypeEvents: items }));
 }
 
 export function dismissBalanceCard() {
-  const state = { ...getState(), dismissedBalanceCard: true };
-  return save(state);
+  return save({ ...getState(), dismissedBalanceCard: true });
 }
 
 export function resetPrototype(now = new Date()) {
@@ -83,7 +169,7 @@ export function resetPrototype(now = new Date()) {
 }
 
 export function hypeCountForVideo(videoId, state = getState()) {
-  return state.hypeEvents.filter((event) => event.videoId === videoId).length;
+  return state.hypeEvents.filter((event) => event.isActive && event.videoId === videoId).length;
 }
 
 export const storeConfig = { DEFAULT_REMAINING_HYPES, STORAGE_KEY };

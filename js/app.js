@@ -4,15 +4,26 @@ import {
   getState,
   hypeCountForVideo,
   hypeVideo,
+  reassignHype,
   resetPrototype,
+  syncBackendState,
+  syncBadges,
+  syncQueue,
   storeConfig,
+  undoHype,
 } from "./hype-store.js";
 import {
+  fetchBadges,
+  fetchHypeQueue,
+  fetchHypeState,
   formatMockPoints,
   getBackendResetLabel,
   getFallbackMockPoints,
   getMockPointsValue,
+  reassignHypeOnBackend,
+  resetBackendDemo,
   submitHypeToBackend,
+  undoHypeOnBackend,
 } from "./hype-backend.js";
 
 const app = document.querySelector("#app");
@@ -29,6 +40,7 @@ let subscribedCreators = new Set();
 let toastTimer;
 let pendingFocusSelector = "";
 let lastHypeResult = null;
+let pendingReassignEventId = null;
 
 const icon = (name, size = 20) => {
   const icons = {
@@ -92,6 +104,23 @@ function thumbnail(video, compact = false) {
   return `<div class="${compact ? "related-thumb" : "thumbnail"} ${video.art}" aria-hidden="true"><span class="art-shape"></span><span class="duration">${video.duration}</span></div>`;
 }
 
+function remainingLabel(state, compact = false) {
+  if (state.unlimitedHypes) return compact ? "∞ this weekend" : "Unlimited Hypes this weekend";
+  return `${state.remainingHypes} ${state.remainingHypes === 1 ? "Hype" : "Hypes"} left`;
+}
+
+function resetLabel(state) {
+  return getBackendResetLabel(state.resetTime);
+}
+
+function formatUndoWindow(expiresAt) {
+  const milliseconds = new Date(expiresAt).getTime() - Date.now();
+  if (milliseconds <= 0) return "Undo window closed";
+  const hours = Math.floor(milliseconds / 3600000);
+  const minutes = Math.floor((milliseconds % 3600000) / 60000);
+  return `${hours}h ${minutes}m to undo`;
+}
+
 function bottomNav() {
   const items = [
     ["home", "Home", "home"],
@@ -118,6 +147,7 @@ function header() {
 }
 
 function videoCard(video) {
+  const state = getState();
   return `<button class="video-card" data-open-video="${video.id}" aria-label="Watch ${video.title}">
     ${thumbnail(video)}
     <span class="video-card-info">
@@ -125,7 +155,7 @@ function videoCard(video) {
       <span>
         <span class="video-title">${video.title}</span>
         <span class="meta">${video.creator} · ${video.views} · ${video.uploaded}</span>
-        ${video.eligible ? '<span class="hype-tag">✦ Hype eligible</span>' : ""}
+        ${video.eligible ? `<span class="hype-tag">✦ ${remainingLabel(state, true)} · ${resetLabel(state)}</span>` : ""}
       </span>
     </span>
   </button>`;
@@ -146,17 +176,18 @@ function homeView() {
 }
 
 function balanceDots(remaining) {
+  if (remaining === null) return `<div class="unlimited-mark" aria-label="Unlimited weekend Hypes">∞</div>`;
   const used = storeConfig.DEFAULT_REMAINING_HYPES - remaining;
   return `<div class="progress-dots" aria-label="${used} of ${storeConfig.DEFAULT_REMAINING_HYPES} Hypes used">${[0, 1, 2].map((index) => `<span class="progress-dot ${index < used ? "is-used" : ""}" aria-hidden="true"></span>`).join("")}</div>`;
 }
 
 function balanceCard(state) {
-  const empty = state.remainingHypes === 0;
+  const empty = !state.unlimitedHypes && state.remainingHypes === 0;
   return `<aside class="balance-card" aria-labelledby="balance-card-title">
     <div class="card-heading"><p class="eyebrow">HYPE BALANCE</p><button class="dismiss-button" data-dismiss-balance aria-label="Dismiss Hype balance card">${icon("close", 18)}</button></div>
-    <h2 id="balance-card-title">${empty ? "All free Hypes used this week" : `${state.remainingHypes} ${state.remainingHypes === 1 ? "Hype" : "Hypes"} left this week`}</h2>
+    <h2 id="balance-card-title">${empty ? "All free Hypes used this period" : remainingLabel(state)}</h2>
     ${balanceDots(state.remainingHypes)}
-    <p class="balance-reset">Your free Hypes reset Monday at 12:00 a.m.</p>
+    <p class="balance-reset">${resetLabel(state)}</p>
     <p class="balance-caption">${empty ? "Explore what viewers are supporting this week." : "Help another emerging creator get discovered."}</p>
     <div class="card-actions">
       <button class="primary-button" data-nav="explore">Explore hyped videos</button>
@@ -170,7 +201,8 @@ function howHypeWorks() {
   return `<section class="how-it-works" aria-labelledby="how-hype-title">
     <div class="card-heading"><strong id="how-hype-title">How Hype works</strong><button class="dismiss-button" data-close-how-hype aria-label="Close Hype information">${icon("close", 18)}</button></div>
     <div class="info-points"><span aria-hidden="true">✦</span><span>Use up to three free Hypes each week on eligible emerging creators.</span></div>
-    <div class="info-points"><span aria-hidden="true">↻</span><span>Your allowance resets every Monday at 12:00 a.m. local time.</span></div>
+    <div class="info-points"><span aria-hidden="true">↻</span><span>Your counter always shows the exact local reset date.</span></div>
+    <div class="info-points"><span aria-hidden="true">↶</span><span>Eligible experiment groups can undo a Hype for 24 hours and reassign it.</span></div>
   </section>`;
 }
 
@@ -192,13 +224,13 @@ function hypeFeedbackCard(video, state) {
   const currentVideoPoints = getMockPointsValue(video.id);
   const resetTiming = usedBackend
     ? getBackendResetLabel(backendState?.resetTime)
-    : "Monday at 12:00 a.m. local time";
+    : resetLabel(state);
 
   return `<section class="hype-feedback-card" aria-label="Hype confirmation">
     <div class="card-heading"><strong>Mock Hype sent</strong></div>
     <p class="balance-caption">This prototype uses clearly labeled mock points and does not connect to real YouTube points.</p>
     <div class="feedback-grid">
-      <div><strong>${remaining}</strong><span>remaining weekly Hypes</span></div>
+      <div><strong>${remaining === null ? "∞" : remaining}</strong><span>remaining Hypes</span></div>
       <div><strong>${formatMockPoints(currentVideoPoints)}</strong><span>current video mock points</span></div>
       <div><strong>${formatMockPoints(pointsTotal)}</strong><span>mock points you contributed</span></div>
     </div>
@@ -229,7 +261,7 @@ function watchView() {
   const compactBalance = state.dismissedBalanceCard && hypeCount > 0;
   const eligibleLabel = !video.eligible
     ? "Not eligible"
-    : state.remainingHypes === 0
+    : !state.unlimitedHypes && state.remainingHypes === 0
       ? "No Hypes left"
       : hypeCount > 0 ? "Hype again" : "Hype";
   const related = videos.filter((item) => item.id !== video.id).slice(0, 3);
@@ -245,11 +277,11 @@ function watchView() {
       </div>
       <div class="watch-action-row" aria-label="Video actions">
         <button class="action-button" data-like="${video.id}" aria-pressed="${isLiked}">${icon("like", 18)}<span>${isLiked ? "Liked" : "Like"}</span></button>
-        <button class="action-button hype-button" data-hype="${video.id}" ${!video.eligible || state.remainingHypes === 0 ? "disabled" : ""} aria-label="${eligibleLabel} ${video.title}">${icon("sparkle", 18)}<span>${eligibleLabel}</span></button>
+        <button class="action-button hype-button" data-hype="${video.id}" ${!video.eligible || (!state.unlimitedHypes && state.remainingHypes === 0) ? "disabled" : ""} aria-label="${eligibleLabel} ${video.title}; ${remainingLabel(state)}">${icon("sparkle", 18)}<span>${eligibleLabel}<small>${remainingLabel(state, true)}</small></span></button>
         <button class="action-button" data-toast="Share is intentionally not connected in this concept.">${icon("share", 18)}<span>Share</span></button>
         <button class="action-button" data-toast="Downloads are intentionally not connected in this concept.">${icon("download", 18)}<span>Download</span></button>
       </div>
-      ${compactBalance ? `<div class="compact-balance">${icon("sparkle", 17)}<span>${state.remainingHypes} ${state.remainingHypes === 1 ? "Hype" : "Hypes"} left this week · resets Monday</span></div>` : ""}
+      ${compactBalance ? `<div class="compact-balance">${icon("sparkle", 17)}<span>${remainingLabel(state)} · ${resetLabel(state)}</span></div>` : ""}
       ${showBalance ? balanceCard(state) : ""}
       ${hypeFeedbackCard(video, state)}
       ${howHypeWorks()}
@@ -267,24 +299,56 @@ function exploreView() {
   return `<section class="screen">
     <header class="explore-header"><button class="back-button" data-back aria-label="Back to Home">${icon("back")}</button><h1>✦ Hype</h1><span class="icon-button" aria-hidden="true"></span></header>
     <div class="explore-content">
-      <section class="explore-summary" aria-label="Weekly Hype balance"><div class="balance-summary"><div><div class="balance-title-row">${icon("sparkle", 18)}<strong>${state.remainingHypes} ${state.remainingHypes === 1 ? "Hype" : "Hypes"} left</strong></div><p class="balance-caption">Resets Monday at 12:00 a.m.</p></div><span class="balance-pill ${state.remainingHypes === 0 ? "is-empty" : ""}">${state.remainingHypes}/3</span></div></section>
+      <section class="explore-summary" aria-label="Hype balance"><div class="balance-summary"><div><div class="balance-title-row">${icon("sparkle", 18)}<strong>${remainingLabel(state)}</strong></div><p class="balance-caption">${resetLabel(state)}</p></div><span class="balance-pill ${state.remainingHypes === 0 ? "is-empty" : ""}">${state.unlimitedHypes ? "∞" : `${state.remainingHypes}/3`}</span></div></section>
       <div class="topics" aria-label="Hype categories">${categories.map((category) => `<button class="chip" data-topic="${category}" aria-pressed="${activeTopic === category}">${category}</button>`).join("")}</div>
       ${exploreVideos.length ? `<div class="explore-list">${exploreVideos.map((video, index) => `<button class="ranked-card" data-open-video="${video.id}" aria-label="Open ranked video ${index + 1}: ${video.title}"><span class="rank-number">${index + 1}</span>${thumbnail(video, true)}<span class="related-copy"><span class="related-title">${video.title}</span><span class="rank-meta">${video.creator}<br>${video.hypePoints}</span></span></button>`).join("")}</div>` : `<div class="empty-state"><span class="empty-spark">✦</span><h2>No videos in this category</h2><p class="empty-copy">Try another Hype category.</p></div>`}
     </div>
   </section>`;
 }
 
+function hypeQueue(state) {
+  const items = [...state.hypeEvents].reverse();
+  return `<section class="you-panel queue-panel"><div class="panel-title-row"><div><p class="eyebrow">HYPE QUEUE</p><h2>Your recent Hypes</h2></div><span class="queue-count">${items.filter((item) => item.isActive).length}</span></div>
+    ${items.length ? `<div class="queue-list">${items.map((event) => {
+      const video = getVideo(event.videoId) || videos[0];
+      const canUndo = event.isActive && new Date(event.undoExpiresAt) > new Date() && state.experiment.undoEnabled;
+      return `<article class="queue-item">${thumbnail(video, true)}<div class="queue-copy"><strong>${video.title}</strong><span>${video.creator}</span><small>${event.isActive ? formatUndoWindow(event.undoExpiresAt) : "Undone · ready to reassign"}</small></div>
+        ${event.isActive ? `<button class="queue-action" data-undo-hype="${event.eventId}" ${canUndo ? "" : "disabled"}>Undo</button>` : `<button class="queue-action" data-open-reassign="${event.eventId}">Reassign</button>`}
+      </article>`;
+    }).join("")}</div>` : `<p class="support-copy">Hyped videos will appear here with their 24-hour undo window.</p>`}
+  </section>`;
+}
+
+function achievements(state) {
+  const catalog = [
+    ["trendspotter", "Trendspotter", "Back a video that reaches the leaderboard"],
+    ["community-builder", "Community Builder", "Support 3 different creators"],
+    ["supporter", "Supporter", "Use 10 Hypes"],
+  ];
+  const earned = new Map(state.badges.map((badge) => [badge.slug, badge]));
+  return `<section class="you-panel"><p class="eyebrow">ACHIEVEMENTS${state.experiment.badgesEnabled ? "" : " · PREVIEW"}</p><h2>Your badges</h2><div class="badge-grid">${catalog.map(([slug, name, description]) => `<div class="badge ${earned.has(slug) ? "is-earned" : ""}" title="${description}"><span class="badge-icon">${earned.has(slug) ? "✦" : "◇"}</span><strong>${name}</strong><small>${earned.has(slug) ? "Earned" : description}</small></div>`).join("")}</div></section>`;
+}
+
+function reassignDialog() {
+  if (!pendingReassignEventId) return "";
+  return `<div class="modal-backdrop" role="presentation"><section class="reassign-modal" role="dialog" aria-modal="true" aria-labelledby="reassign-title"><div class="card-heading"><h2 id="reassign-title">Choose a new video</h2><button class="dismiss-button" data-close-reassign aria-label="Close">${icon("close", 18)}</button></div><p class="support-copy">Your returned Hype will be applied immediately.</p><div class="reassign-list">${videos.filter((video) => video.eligible).map((video) => `<button data-reassign-video="${video.id}">${avatar(video)}<span><strong>${video.title}</strong><small>${video.creator}</small></span></button>`).join("")}</div></section></div>`;
+}
+
 function youView() {
   const state = getState();
-  const used = storeConfig.DEFAULT_REMAINING_HYPES - state.remainingHypes;
+  const used = state.hypeEvents.filter((event) => event.isActive).length;
   return `<section class="screen">
     ${header()}
     <div class="you-content">
       <section class="you-hero"><span class="profile-dot">IH</span><h1>Your space</h1><p class="support-copy">A local prototype for more intentional creator support.</p></section>
-      <section class="you-panel"><h2>This week's Hypes</h2><p class="support-copy">You have used <strong>${used}</strong> of 3 free Hypes. Your balance resets Monday at 12:00 a.m.</p>${balanceDots(state.remainingHypes)}</section>
+      <aside class="experiment-banner"><span>Experiment group</span><strong>${state.experiment.group.replaceAll("_", " ")}</strong><small>${state.experiment.quotaSchedule === "weekend_bonus" ? "Weekend Bonus active · Friday reset" : "Standard Monday reset"}${state.experiment.undoEnabled ? " · 24-hour undo" : ""}</small></aside>
+      <section class="you-panel"><h2>Current Hype balance</h2><p class="support-copy">You have used <strong>${used}</strong> Hypes. <strong>${remainingLabel(state)}</strong>. ${resetLabel(state)}.</p>${balanceDots(state.remainingHypes)}</section>
+      ${hypeQueue(state)}
+      ${achievements(state)}
       <section class="you-panel"><h2>Demo controls</h2><p class="support-copy">Reset local Hype history and restore the weekly balance to three.</p><button class="danger-button" data-reset>Reset prototype</button></section>
       <p class="disclaimer">Unofficial product concept. All creators, videos, and Hype activity are fictional mock data.</p>
     </div>
+    ${reassignDialog()}
   </section>`;
 }
 
@@ -351,21 +415,22 @@ app.addEventListener("click", async (event) => {
     let result;
     if (backendResult.ok) {
       const backendState = backendResult.data;
-      result = { ok: true, state: { remainingHypes: backendState.remainingHypes }, backendState };
+      const syncedState = syncBackendState(backendState);
+      result = { ok: true, state: syncedState, backendState };
       lastHypeResult = {
         usedBackend: true,
         backendState: {
           ...backendState,
           mockPointsTotal: getFallbackMockPoints(backendState.hypeHistory || []),
-          resetTime: new Date().toISOString(),
+          resetTime: backendState.resetTime,
         },
       };
     } else {
       result = hypeVideo(video.id);
       if (!result.ok) {
         track("hype_blocked_zero_balance", { videoId: video.id });
-        announce("All free Hypes have been used this week. They reset Monday at 12:00 a.m.");
-        return showToast("All free Hypes have been used this week.");
+        announce(`All free Hypes have been used. ${resetLabel(beforeState)}.`);
+        return showToast("All free Hypes have been used for this period.");
       }
       lastHypeResult = {
         usedBackend: false,
@@ -376,8 +441,41 @@ app.addEventListener("click", async (event) => {
     const { remainingHypes } = result.state;
     track("hype_succeeded", { videoId: video.id, remainingHypes });
     track("balance_card_viewed", { videoId: video.id, remainingHypes });
-    announce(`${remainingHypes} ${remainingHypes === 1 ? "Hype" : "Hypes"} left this week. Your free Hypes reset Monday at 12:00 a.m.`);
+    announce(`${remainingHypes === null ? "Unlimited Hypes" : `${remainingHypes} Hypes left`}. ${resetLabel(result.state)}.`);
     render();
+    return;
+  }
+  if (button.dataset.undoHype) {
+    const eventId = button.dataset.undoHype;
+    const backendResult = /^\d+$/.test(eventId) ? await undoHypeOnBackend(eventId) : { ok: false };
+    const localResult = undoHype(eventId);
+    if (!backendResult.ok && !localResult.ok) return showToast("This Hype can no longer be undone.");
+    track("hype_undone", { eventId });
+    announce("Hype undone. One Hype is available to reassign.");
+    showToast("Hype returned — choose Reassign when ready.");
+    return;
+  }
+  if (button.dataset.openReassign) {
+    pendingReassignEventId = button.dataset.openReassign;
+    render();
+    return;
+  }
+  if (button.dataset.closeReassign !== undefined) {
+    pendingReassignEventId = null;
+    render();
+    return;
+  }
+  if (button.dataset.reassignVideo) {
+    const eventId = pendingReassignEventId;
+    const videoId = button.dataset.reassignVideo;
+    const backendResult = /^\d+$/.test(String(eventId)) ? await reassignHypeOnBackend(eventId, videoId) : { ok: false };
+    const localResult = reassignHype(eventId, videoId);
+    if (backendResult.ok) syncBackendState(backendResult.data);
+    if (!backendResult.ok && !localResult.ok) return showToast("That Hype could not be reassigned.");
+    pendingReassignEventId = null;
+    track("hype_reassigned", { eventId, videoId });
+    announce("Hype reassigned successfully.");
+    showToast("Hype reassigned.");
     return;
   }
   if (button.dataset.dismissBalance !== undefined) {
@@ -403,6 +501,7 @@ app.addEventListener("click", async (event) => {
     const confirmed = window.confirm("Reset this prototype? This restores three free Hypes and clears local Hype history.");
     if (!confirmed) return;
     resetPrototype();
+    await resetBackendDemo();
     lastHypedVideoId = null;
     track("prototype_reset");
     announce("Prototype reset. You now have three free Hypes this week.");
@@ -411,3 +510,16 @@ app.addEventListener("click", async (event) => {
 });
 
 render();
+
+async function hydrateFromBackend() {
+  const [stateResult, badgeResult, queueResult] = await Promise.all([fetchHypeState(), fetchBadges(), fetchHypeQueue()]);
+  if (stateResult.ok) syncBackendState(stateResult.data);
+  if (queueResult.ok) syncQueue(queueResult.data.items);
+  if (badgeResult.ok) syncBadges(badgeResult.data.items);
+  render();
+}
+
+hydrateFromBackend();
+window.setInterval(() => {
+  if (currentView === "you" && getState().hypeEvents.some((event) => event.isActive)) render();
+}, 60000);
